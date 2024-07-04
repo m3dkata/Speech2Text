@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     libc-dev \
     libffi-dev \
+    flac \
     && rm -rf /var/lib/apt/lists/*
 
 # Clone the repository
