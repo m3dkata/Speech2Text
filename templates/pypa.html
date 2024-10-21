@@ -16,7 +16,7 @@
         <div class="container">
             <div class="file has-name is-fullwidth">
                 <label class="file-label">
-                    <input class="file-input" type="file" id="audioFile" accept="audio/*" onchange="loadAudio()">
+                    <input class="file-input" type="file" id="audioFile" accept="audio/*, .m4a" onchange="loadAudio()">
                     <span class="file-cta">
                         <span class="file-icon">
                             <i class="fas fa-upload"></i>
@@ -89,12 +89,12 @@
             try {
                 const successful = document.execCommand('copy');
                 if (successful) {
-                    alert('Transcription copied to clipboard!');
+                    alert('Транскрипцията е копирана в клипборда!');
                 } else {
-                    alert('Unable to copy transcription.');
+                    alert('Текстът не можа да се копира.');
                 }
             } catch (err) {
-                console.error('Fallback: Unable to copy', err);
+                console.error('Текстът не можа да се копира', err);
             }
     
             document.body.removeChild(textarea);
