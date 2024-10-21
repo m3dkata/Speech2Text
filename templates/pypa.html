@@ -19,7 +19,7 @@
     <textarea id="transcription" rows="5" cols="50" readonly></textarea>
 
     <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/wavesurfer.min.js"></script>
-<script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.regions.min.js"></script>
+    <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.regions.min.js"></script>
     <script>
         let wavesurfer;
         let audioBlob;
@@ -31,13 +31,13 @@
                 alert('Please select an audio file');
                 return;
             }
-        
+            
             audioBlob = file;
-        
+            
             if (wavesurfer) {
                 wavesurfer.destroy();
             }
-        
+            
             wavesurfer = WaveSurfer.create({
                 container: '#waveform',
                 waveColor: 'violet',
@@ -46,21 +46,20 @@
                     WaveSurfer.regions.create()
                 ]
             });
-        
+            
             wavesurfer.loadBlob(file);
-        
+            
             wavesurfer.on('ready', function() {
                 console.log('WaveSurfer is ready');
                 document.getElementById('playPause').onclick = function() {
                     wavesurfer.playPause();
                 };
             });
-        
+            
             wavesurfer.on('error', function(err) {
                 console.error('WaveSurfer error:', err);
             });
         }
-        
 
         function createRegion() {
             if (!wavesurfer) {
@@ -85,39 +84,39 @@
                 alert('Please load an audio file first');
                 return;
             }
-        
+
             const regions = wavesurfer.regions.list;
             if (Object.keys(regions).length === 0) {
                 alert('Please create a 1-minute region first');
                 return;
             }
-        
+
             const region = regions[Object.keys(regions)[0]];
             const startTime = region.start;
             const endTime = region.end;
-        
+
             const audioContext = new (window.AudioContext || window.webkitAudioContext)();
             const response = await fetch(URL.createObjectURL(audioBlob));
             const arrayBuffer = await response.arrayBuffer();
             const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        
+
             const offlineContext = new OfflineAudioContext(
                 1,
                 (endTime - startTime) * audioContext.sampleRate,
                 audioContext.sampleRate
             );
-        
+
             const source = offlineContext.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(offlineContext.destination);
             source.start(0, startTime, endTime - startTime);
-        
+
             const renderedBuffer = await offlineContext.startRendering();
             const wavBlob = bufferToWave(renderedBuffer, renderedBuffer.length);
-        
+
             const formData = new FormData();
             formData.append('file', wavBlob, 'selected_audio.wav');
-        
+
             try {
                 const response = await fetch('/pypa/transcribe', {
                     method: 'POST',
@@ -131,45 +130,38 @@
                 alert('An error occurred during transcription');
             }
         }
-        
 
         function bufferToWave(abuffer, len) {
             const numOfChan = abuffer.numberOfChannels;
             const length = len * numOfChan * 2 + 44;
             const buffer = new ArrayBuffer(length);
             const view = new DataView(buffer);
-            const channels = [];
-            let i;
-            let sample;
             let offset = 0;
             let pos = 0;
 
             // write WAVE header
-            setUint32(0x46464952);
-            setUint32(length - 8);
-            setUint32(0x45564157);
-            setUint32(0x20746d66);
-            setUint32(16);
-            setUint16(1);
+            setUint32(0x46464952); // "RIFF"
+            setUint32(length - 8); // file length - 8
+            setUint32(0x45564157); // "WAVE"
+            setUint32(0x20746d66); // "fmt " chunk
+            setUint32(16); // length = 16
+            setUint16(1); // PCM (uncompressed)
             setUint16(numOfChan);
             setUint32(abuffer.sampleRate);
-            setUint32(abuffer.sampleRate * 2 * numOfChan);
-            setUint16(numOfChan * 2);
-            setUint16(16);
-            setUint32(0x61746164);
-            setUint32(len * numOfChan * 2);
+            setUint32(abuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
+            setUint16(numOfChan * 2); // block-align
+            setUint16(16); // 16-bit
+            setUint32(0x61746164); // "data" - chunk
+            setUint32(len * numOfChan * 2); // chunk length
 
-            for (i = 0; i < abuffer.numberOfChannels; i++)
-                channels.push(abuffer.getChannelData(i));
-
-            while (pos < len) {
-                for (i = 0; i < numOfChan; i++) {
-                    sample = Math.max(-1, Math.min(1, channels[i][pos]));
-                    sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
-                    view.setInt16(offset, sample, true);
+            // write interleaved data
+            for (let i = 0; i < abuffer.numberOfChannels; i++) {
+                const channel = abuffer.getChannelData(i);
+                for (let j = 0; j < len; j++) {
+                    const sample = Math.max(-1, Math.min(1, channel[j]));
+                    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
                     offset += 2;
                 }
-                pos++;
             }
 
             return new Blob([buffer], { type: "audio/wav" });
