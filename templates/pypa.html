@@ -4,19 +4,52 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Speech to Text</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
     <style>
         #waveform { width: 100%; height: 128px; }
+        .file-label { width: 100%; }
+        .loader-wrapper { position: fixed; top: 0; left: 0; height: 100%; width: 100%; background: rgba(250, 3, 3, 0.397); display: flex; justify-content: center; align-items: center; z-index: 1000; }
     </style>
 </head>
 <body>
-    <h1>Speech to Text</h1>
-    <input type="file" id="audioFile" accept="audio/*">
-    <button onclick="loadAudio()">Load Audio</button>
-    <div id="waveform"></div>
-    <button id="playPause">Play/Pause</button>
-    <button onclick="createRegion()">Create 1-Minute Region</button>
-    <button onclick="transcribeSelection()">Transcribe Selection</button>
-    <textarea id="transcription" rows="5" cols="50" readonly></textarea>
+    <section class="section">
+        <div class="container">
+            <div class="file has-name is-fullwidth">
+                <label class="file-label">
+                    <input class="file-input" type="file" id="audioFile" accept="audio/*" onchange="loadAudio()">
+                    <span class="file-cta">
+                        <span class="file-icon">
+                            <i class="fas fa-upload"></i>
+                        </span>
+                        <span class="file-label">
+                            Избери файл…
+                        </span>
+                    </span>
+                    <span class="file-name" id="fileName">
+                        Няма качен файл!
+                    </span>
+                </label>
+            </div>
+
+            <div id="waveform" class="mt-4"></div>
+            <div id="currentTime" class="mt-2">Позиция: 0:00</div>
+            <div id="regionTimes" class="mt-2">Начало: 0:00, Край: 0:00</div>
+            <div class="buttons mt-4">
+                <button id="playPause" class="button is-primary">Пусни/Пауза</button>
+                <button onclick="createRegion()" class="button is-info">1 минута</button>
+                <button onclick="transcribeSelection()" class="button is-success">Транскрибиране част</button>
+                <button onclick="transcribeWholeAudio()" class="button is-success">Транскрибиране всичко</button>
+            </div>
+
+            <button onclick="copyTranscription()" class="button is-link mt-2">КОПИРАЙ</button>
+            <textarea id="transcription" class="textarea mt-4" rows="5" readonly></textarea>
+            
+        </div>
+    </section>
+
+    <div class="loader-wrapper" style="display: none;">
+        <div class="loader is-loading"></div>
+    </div>
 
     <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/wavesurfer.min.js"></script>
     <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.regions.min.js"></script>
@@ -24,19 +57,86 @@
         let wavesurfer;
         let audioBlob;
 
+        function copyTranscription() {
+            const transcriptionText = document.getElementById('transcription').value;
+    
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                // Use the Clipboard API
+                navigator.clipboard.writeText(transcriptionText).then(function() {
+                    alert('Транскрипцията е копирана в клипборда!');
+                }, function(err) {
+                    console.error('Текстът не можа да се копира: ', err);
+                    fallbackCopyText(transcriptionText);
+                });
+            } else {
+                // Fallback method
+                fallbackCopyText(transcriptionText);
+            }
+        }
+    
+        // Fallback method using a temporary textarea
+        function fallbackCopyText(text) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            // Prevent scrolling to bottom of page in Microsoft Edge
+            textarea.style.position = 'fixed';
+            textarea.style.top = '-1000px';
+            textarea.style.left = '-1000px';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+    
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    alert('Transcription copied to clipboard!');
+                } else {
+                    alert('Unable to copy transcription.');
+                }
+            } catch (err) {
+                console.error('Fallback: Unable to copy', err);
+            }
+    
+            document.body.removeChild(textarea);
+        }
+
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return minutes + ':' + (secs < 10 ? '0' : '') + secs;
+        }
+
+        function updateRegionDisplay(region) {
+            const start = formatTime(region.start);
+            const end = formatTime(region.end);
+            document.getElementById('regionTimes').textContent = `Region: Start: ${start}, End: ${end}`;
+        }
+
+        function showLoader() {
+            document.querySelector('.loader-wrapper').style.display = 'flex';
+        }
+
+        function hideLoader() {
+            document.querySelector('.loader-wrapper').style.display = 'none';
+        }
+
         function loadAudio() {
             const fileInput = document.getElementById('audioFile');
             const file = fileInput.files[0];
             if (!file) {
-                alert('Please select an audio file');
+                alert('Моля изберете аудио файл!');
                 return;
             }
+            
+            document.getElementById('fileName').textContent = file.name;
             
             audioBlob = file;
             
             if (wavesurfer) {
                 wavesurfer.destroy();
             }
+            
+            showLoader();
             
             wavesurfer = WaveSurfer.create({
                 container: '#waveform',
@@ -54,16 +154,29 @@
                 document.getElementById('playPause').onclick = function() {
                     wavesurfer.playPause();
                 };
+                hideLoader();
+                // Update current time display during playback
+                wavesurfer.on('audioprocess', function() {
+                    const currentTime = wavesurfer.getCurrentTime();
+                    document.getElementById('currentTime').textContent = 'Current Time: ' + formatTime(currentTime);
+                });
+
+                // Update current time display when user seeks
+                wavesurfer.on('seek', function() {
+                    const currentTime = wavesurfer.getCurrentTime();
+                    document.getElementById('currentTime').textContent = 'Current Time: ' + formatTime(currentTime);
+                });
             });
             
             wavesurfer.on('error', function(err) {
                 console.error('WaveSurfer error:', err);
+                hideLoader();
             });
         }
 
         function createRegion() {
             if (!wavesurfer) {
-                alert('Please load an audio file first');
+                alert('Моля изберете аудио файл!');
                 return;
             }
 
@@ -72,109 +185,228 @@
             const currentTime = wavesurfer.getCurrentTime();
             const endTime = Math.min(currentTime + 60, wavesurfer.getDuration());
 
-            wavesurfer.addRegion({
+            const region = wavesurfer.addRegion({
                 start: currentTime,
                 end: endTime,
                 color: 'rgba(255, 0, 0, 0.1)'
             });
+    
+            updateRegionDisplay(region);
+    
+            // Listen for region updates (e.g., resize or drag)
+            region.on('update-end', function() {
+                updateRegionDisplay(region);
+            });
         }
 
         async function transcribeSelection() {
-            if (!wavesurfer) {
-                alert('Please load an audio file first');
+            if (!wavesurfer || !audioBlob) {
+                console.error('WaveSurfer or audio not initialized');
                 return;
             }
-
+        
             const regions = wavesurfer.regions.list;
             if (Object.keys(regions).length === 0) {
-                alert('Please create a 1-minute region first');
+                console.error('No region selected');
                 return;
             }
-
+        
             const region = regions[Object.keys(regions)[0]];
             const startTime = region.start;
             const endTime = region.end;
-
+        
+            // Load the audio into an AudioBuffer
+            const arrayBuffer = await audioBlob.arrayBuffer();
             const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const response = await fetch(URL.createObjectURL(audioBlob));
-            const arrayBuffer = await response.arrayBuffer();
-            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-
-            const offlineContext = new OfflineAudioContext(
-                1,
-                (endTime - startTime) * audioContext.sampleRate,
-                audioContext.sampleRate
+            const fullAudioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        
+            // Calculate the start and end samples
+            const sampleRate = fullAudioBuffer.sampleRate;
+            const startSample = Math.floor(startTime * sampleRate);
+            const endSample = Math.floor(endTime * sampleRate);
+            const frameCount = endSample - startSample;
+    
+            if (frameCount <= 0) {
+                console.error('Invalid region selected');
+                return;
+            }
+    
+            // Create a new AudioBuffer for the selected region
+            const selectedAudioBuffer = audioContext.createBuffer(
+                fullAudioBuffer.numberOfChannels,
+                frameCount,
+                sampleRate
             );
-
-            const source = offlineContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(offlineContext.destination);
-            source.start(0, startTime, endTime - startTime);
-
-            const renderedBuffer = await offlineContext.startRendering();
-            const wavBlob = bufferToWave(renderedBuffer, renderedBuffer.length);
-
+            for (let channel = 0; channel < fullAudioBuffer.numberOfChannels; channel++) {
+                const fullChannelData = fullAudioBuffer.getChannelData(channel);
+                const selectedChannelData = selectedAudioBuffer.getChannelData(channel);
+                selectedChannelData.set(fullChannelData.slice(startSample, endSample));
+            }
+        
+            // Convert the selected AudioBuffer to WAV Blob
+            const wavBlob = await audioBufferToWav(selectedAudioBuffer);
+        
+            console.log('Selected WAV blob size:', wavBlob.size);
+        
             const formData = new FormData();
-            formData.append('file', wavBlob, 'selected_audio.wav');
-
+            formData.append('file', wavBlob, 'audio.wav');
+        
             try {
+                showLoader();
                 const response = await fetch('/pypa/transcribe', {
                     method: 'POST',
                     body: formData
                 });
+                hideLoader();
                 const data = await response.json();
                 console.log('Server response:', data);
-                document.getElementById('transcription').value = data.transcription;
+                document.getElementById('transcription').value = data.transcription || data.error;
             } catch (error) {
-                console.error('Error:', error);
-                alert('An error occurred during transcription');
+                hideLoader();
+                console.error('Fetch error:', error);
             }
         }
-
-        function bufferToWave(abuffer, len) {
-            const numOfChan = abuffer.numberOfChannels;
-            const length = len * numOfChan * 2 + 44;
-            const buffer = new ArrayBuffer(length);
-            const view = new DataView(buffer);
-            let offset = 0;
-            let pos = 0;
-
-            // write WAVE header
-            setUint32(0x46464952); // "RIFF"
-            setUint32(length - 8); // file length - 8
-            setUint32(0x45564157); // "WAVE"
-            setUint32(0x20746d66); // "fmt " chunk
-            setUint32(16); // length = 16
-            setUint16(1); // PCM (uncompressed)
-            setUint16(numOfChan);
-            setUint32(abuffer.sampleRate);
-            setUint32(abuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
-            setUint16(numOfChan * 2); // block-align
-            setUint16(16); // 16-bit
-            setUint32(0x61746164); // "data" - chunk
-            setUint32(len * numOfChan * 2); // chunk length
-
-            // write interleaved data
-            for (let i = 0; i < abuffer.numberOfChannels; i++) {
-                const channel = abuffer.getChannelData(i);
-                for (let j = 0; j < len; j++) {
+        
+        function audioBufferToWav(buffer) {
+            const numberOfChannels = buffer.numberOfChannels;
+            const sampleRate = buffer.sampleRate;
+            const length = buffer.length * numberOfChannels * 2;
+            const arrayBuffer = new ArrayBuffer(44 + length);
+            const view = new DataView(arrayBuffer);
+        
+            // Write WAV header
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + length, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, numberOfChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * numberOfChannels * 2, true);
+            view.setUint16(32, numberOfChannels * 2, true);
+            view.setUint16(34, 16, true);
+            writeString(view, 36, 'data');
+            view.setUint32(40, length, true);
+        
+            // Write PCM audio data
+            const offset = 44;
+            for (let i = 0; i < buffer.numberOfChannels; i++) {
+                const channel = buffer.getChannelData(i);
+                for (let j = 0; j < channel.length; j++) {
                     const sample = Math.max(-1, Math.min(1, channel[j]));
-                    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-                    offset += 2;
+                    view.setInt16(offset + (j * numberOfChannels + i) * 2, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
                 }
             }
-
-            return new Blob([buffer], { type: "audio/wav" });
-
-            function setUint16(data) {
-                view.setUint16(pos, data, true);
-                pos += 2;
+        
+            return new Blob([view], { type: 'audio/wav' });
+        }
+        
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
             }
-
-            function setUint32(data) {
-                view.setUint32(pos, data, true);
-                pos += 4;
+        }
+        
+        async function transcribeWholeAudio() {
+            if (!wavesurfer || !audioBlob) {
+                console.error('WaveSurfer or audio not initialized');
+                return;
             }
+    
+            // Load the audio into an AudioBuffer
+            const arrayBuffer = await audioBlob.arrayBuffer();
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const fullAudioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    
+            const sampleRate = fullAudioBuffer.sampleRate;
+            const totalDuration = fullAudioBuffer.duration;
+            const maxChunkDuration = 30; // Max duration per chunk in seconds
+            let combinedTranscription = '';
+    
+            showLoader(); // Show loader while processing
+    
+            let currentTime = 0;
+    
+            while (currentTime < totalDuration) {
+                let endTime = Math.min(currentTime + maxChunkDuration, totalDuration);
+    
+                // Try to adjust endTime to the nearest silence to avoid splitting words
+                endTime = await adjustToNearestSilence(fullAudioBuffer, currentTime, endTime);
+    
+                const startSample = Math.floor(currentTime * sampleRate);
+                const endSample = Math.floor(endTime * sampleRate);
+                const frameCount = endSample - startSample;
+    
+                // Create a new AudioBuffer for the current chunk
+                const chunkBuffer = audioContext.createBuffer(
+                    fullAudioBuffer.numberOfChannels,
+                    frameCount,
+                    sampleRate
+                );
+    
+                for (let channel = 0; channel < fullAudioBuffer.numberOfChannels; channel++) {
+                    const fullChannelData = fullAudioBuffer.getChannelData(channel);
+                    const chunkChannelData = chunkBuffer.getChannelData(channel);
+                    chunkChannelData.set(fullChannelData.slice(startSample, endSample));
+                }
+    
+                // Convert chunk AudioBuffer to WAV Blob
+                const wavBlob = await audioBufferToWav(chunkBuffer);
+    
+                console.log(`Processing chunk: ${currentTime}s to ${endTime}s`);
+    
+                // Send the chunk to backend for transcription
+                const formData = new FormData();
+                formData.append('file', wavBlob, 'audio.wav');
+    
+                try {
+                    const response = await fetch('/pypa/transcribe', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await response.json();
+                    console.log('Server response:', data);
+                    if (data.transcription) {
+                        combinedTranscription += data.transcription + ' ';
+                    } else if (data.error) {
+                        combinedTranscription += `[Error in chunk ${currentTime}s-${endTime}s: ${data.error}] `;
+                    }
+                } catch (error) {
+                    console.error('Fetch error:', error);
+                    combinedTranscription += `[Error in chunk ${currentTime}s-${endTime}s: ${error.message}] `;
+                }
+    
+                currentTime = endTime;
+            }
+    
+            hideLoader(); // Hide loader after processing
+    
+            // Display the combined transcription
+            document.getElementById('transcription').value = combinedTranscription.trim();
+        }
+    
+        async function adjustToNearestSilence(audioBuffer, startTime, endTime) {
+            const sampleRate = audioBuffer.sampleRate;
+            const channelData = audioBuffer.getChannelData(0); // Use first channel for simplicity
+            const startSample = Math.floor(startTime * sampleRate);
+            const endSample = Math.floor(endTime * sampleRate);
+    
+            // Define parameters for silence detection
+            const silenceThreshold = 0.02; // Adjust based on audio amplitude (lower is more sensitive)
+            const backwardSearchSamples = sampleRate * 2; // Search up to 2 seconds before endSample
+    
+            // Search backward from endSample to find silence
+            for (let i = endSample; i > endSample - backwardSearchSamples && i > startSample; i--) {
+                if (Math.abs(channelData[i]) < silenceThreshold) {
+                    const adjustedEndTime = i / sampleRate;
+                    console.log(`Adjusted endTime from ${endTime}s to ${adjustedEndTime}s to avoid splitting a word.`);
+                    return adjustedEndTime;
+                }
+            }
+    
+            // If no silence detected, return original endTime
+            return endTime;
         }
     </script>
 </body>
