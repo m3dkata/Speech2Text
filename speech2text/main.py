@@ -1,9 +1,14 @@
+import logging
 import os
 import tempfile
-from fastapi import FastAPI, File, UploadFile, Form
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, File, UploadFile, Form, Request
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.templating import Jinja2Templates
 import speech_recognition as sr
+from pydub import AudioSegment
+
+templates = Jinja2Templates(directory="templates")
 
 app = FastAPI(
     title="Speech to Text API",
@@ -19,6 +24,42 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
+
+@app.get("/pypa", response_class=HTMLResponse)
+async def pypa_page(request: Request):
+    return templates.TemplateResponse("pypa.html", {"request": request})
+
+@app.post("/pypa/transcribe")
+async def pypa_transcribe(file: UploadFile = File(...)):
+    try:
+        # Create a temporary file to store the uploaded audio
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+            temp_audio.write(await file.read())
+            temp_audio_path = temp_audio.name
+
+        # Convert audio to WAV if it's not already
+        if not file.filename.lower().endswith('.wav'):
+            audio = AudioSegment.from_file(temp_audio_path)
+            audio.export(temp_audio_path, format="wav")
+
+        # Initialize the recognizer
+        recognizer = sr.Recognizer()
+
+        # Load the audio file
+        with sr.AudioFile(temp_audio_path) as source:
+            audio = recognizer.record(source)
+
+        # Perform the transcription
+        text = recognizer.recognize_google(audio, language="bg-BG")
+
+        # Remove the temporary file
+        os.unlink(temp_audio_path)
+
+        return JSONResponse(content={"transcription": text}, status_code=200)
+
+    except Exception as e:
+        logging.error(f"Transcription error: {str(e)}", exc_info=True)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.post("/transcribe/", summary="Transcribe speech to text")
 async def transcribe_audio(

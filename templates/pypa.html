@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech to Text</title>
+    <style>
+        #waveform { width: 100%; height: 128px; }
+    </style>
+</head>
+<body>
+    <h1>Speech to Text</h1>
+    <input type="file" id="audioFile" accept="audio/*">
+    <button onclick="loadAudio()">Load Audio</button>
+    <div id="waveform"></div>
+    <button id="playPause">Play/Pause</button>
+    <button onclick="createRegion()">Create 1-Minute Region</button>
+    <button onclick="transcribeSelection()">Transcribe Selection</button>
+    <textarea id="transcription" rows="5" cols="50" readonly></textarea>
+
+    <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/wavesurfer.min.js"></script>
+<script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.regions.min.js"></script>
+    <script>
+        let wavesurfer;
+        let audioBlob;
+
+        function loadAudio() {
+            const fileInput = document.getElementById('audioFile');
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('Please select an audio file');
+                return;
+            }
+        
+            audioBlob = file;
+        
+            if (wavesurfer) {
+                wavesurfer.destroy();
+            }
+        
+            wavesurfer = WaveSurfer.create({
+                container: '#waveform',
+                waveColor: 'violet',
+                progressColor: 'purple',
+                plugins: [
+                    WaveSurfer.regions.create()
+                ]
+            });
+        
+            wavesurfer.loadBlob(file);
+        
+            wavesurfer.on('ready', function() {
+                console.log('WaveSurfer is ready');
+                document.getElementById('playPause').onclick = function() {
+                    wavesurfer.playPause();
+                };
+            });
+        
+            wavesurfer.on('error', function(err) {
+                console.error('WaveSurfer error:', err);
+            });
+        }
+        
+
+        function createRegion() {
+            if (!wavesurfer) {
+                alert('Please load an audio file first');
+                return;
+            }
+
+            wavesurfer.clearRegions();
+
+            const currentTime = wavesurfer.getCurrentTime();
+            const endTime = Math.min(currentTime + 60, wavesurfer.getDuration());
+
+            wavesurfer.addRegion({
+                start: currentTime,
+                end: endTime,
+                color: 'rgba(255, 0, 0, 0.1)'
+            });
+        }
+
+        async function transcribeSelection() {
+            if (!wavesurfer) {
+                alert('Please load an audio file first');
+                return;
+            }
+        
+            const regions = wavesurfer.regions.list;
+            if (Object.keys(regions).length === 0) {
+                alert('Please create a 1-minute region first');
+                return;
+            }
+        
+            const region = regions[Object.keys(regions)[0]];
+            const startTime = region.start;
+            const endTime = region.end;
+        
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const response = await fetch(URL.createObjectURL(audioBlob));
+            const arrayBuffer = await response.arrayBuffer();
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        
+            const offlineContext = new OfflineAudioContext(
+                1,
+                (endTime - startTime) * audioContext.sampleRate,
+                audioContext.sampleRate
+            );
+        
+            const source = offlineContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(offlineContext.destination);
+            source.start(0, startTime, endTime - startTime);
+        
+            const renderedBuffer = await offlineContext.startRendering();
+            const wavBlob = bufferToWave(renderedBuffer, renderedBuffer.length);
+        
+            const formData = new FormData();
+            formData.append('file', wavBlob, 'selected_audio.wav');
+        
+            try {
+                const response = await fetch('/pypa/transcribe', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                console.log('Server response:', data);
+                document.getElementById('transcription').value = data.transcription;
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred during transcription');
+            }
+        }
+        
+
+        function bufferToWave(abuffer, len) {
+            const numOfChan = abuffer.numberOfChannels;
+            const length = len * numOfChan * 2 + 44;
+            const buffer = new ArrayBuffer(length);
+            const view = new DataView(buffer);
+            const channels = [];
+            let i;
+            let sample;
+            let offset = 0;
+            let pos = 0;
+
+            // write WAVE header
+            setUint32(0x46464952);
+            setUint32(length - 8);
+            setUint32(0x45564157);
+            setUint32(0x20746d66);
+            setUint32(16);
+            setUint16(1);
+            setUint16(numOfChan);
+            setUint32(abuffer.sampleRate);
+            setUint32(abuffer.sampleRate * 2 * numOfChan);
+            setUint16(numOfChan * 2);
+            setUint16(16);
+            setUint32(0x61746164);
+            setUint32(len * numOfChan * 2);
+
+            for (i = 0; i < abuffer.numberOfChannels; i++)
+                channels.push(abuffer.getChannelData(i));
+
+            while (pos < len) {
+                for (i = 0; i < numOfChan; i++) {
+                    sample = Math.max(-1, Math.min(1, channels[i][pos]));
+                    sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
+                    view.setInt16(offset, sample, true);
+                    offset += 2;
+                }
+                pos++;
+            }
+
+            return new Blob([buffer], { type: "audio/wav" });
+
+            function setUint16(data) {
+                view.setUint16(pos, data, true);
+                pos += 2;
+            }
+
+            function setUint32(data) {
+                view.setUint32(pos, data, true);
+                pos += 4;
+            }
+        }
+    </script>
+</body>
+</html>
