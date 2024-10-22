@@ -5,24 +5,54 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Speech to Text</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <style>
         #waveform { width: 100%; height: 128px; }
         .file-label { width: 100%; }
-        .loader-wrapper { position: fixed; top: 0; left: 0; height: 100%; width: 100%; background: rgba(250, 3, 3, 0.397); display: flex; justify-content: center; align-items: center; z-index: 1000; }
+        .loader-wrapper {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.3); /* Semi-transparent background */
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px); /* For Safari support */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .hidden {
+            display: none;
+        }
+        .loader {
+            border: 8px solid rgba(196, 25, 25, 0.521);
+            border-top: 8px solid rgb(255, 0, 0);
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
     <section class="section">
         <div class="container">
+            <div id="waveform" class="mt-4"></div>
             <div class="file has-name is-fullwidth">
                 <label class="file-label">
                     <input class="file-input" type="file" id="audioFile" accept="audio/*, .m4a" onchange="loadAudio()">
                     <span class="file-cta">
                         <span class="file-icon">
-                            <i class="fas fa-upload"></i>
+                            <i class="fa fa-upload" aria-hidden="true"></i>
                         </span>
                         <span class="file-label">
-                            Избери файл…
+                            Качи файл…
                         </span>
                     </span>
                     <span class="file-name" id="fileName">
@@ -30,25 +60,27 @@
                     </span>
                 </label>
             </div>
-
-            <div id="waveform" class="mt-4"></div>
             <div id="currentTime" class="mt-2">Позиция: 0:00</div>
             <div id="regionTimes" class="mt-2">Начало: 0:00, Край: 0:00</div>
             <div class="buttons mt-4">
-                <button id="playPause" class="button is-primary">Пусни/Пауза</button>
-                <button onclick="createRegion()" class="button is-info">1 минута</button>
-                <button onclick="transcribeSelection()" class="button is-success">Транскрибиране част</button>
-                <button onclick="transcribeWholeAudio()" class="button is-success">Транскрибиране всичко</button>
+                <!-- HTML Button Structure -->
+                <button id="playPause" class="button is-primary">
+                    <i id="playIcon" class="fa-solid fa-play"></i>
+                    <i id="pauseIcon" class="fa-solid fa-pause" style="display: none;"></i>
+                </button>
+                <button onclick="createRegion()" class="button is-info">1 мин Регион</button>
+                <button onclick="transcribeSelection()" class="button is-info">Транскр. Регион</button>
+                <button onclick="transcribeWholeAudio()" class="button is-danger">Транскрибиране всичко<i class="fa-solid fas-pipe-section"></i></button>
             </div>
 
-            <button onclick="copyTranscription()" class="button is-link mt-2">КОПИРАЙ</button>
-            <textarea id="transcription" class="textarea mt-4" rows="5" readonly></textarea>
+            <button onclick="copyTranscription()" class="button is-link mt-2"><i class="fa-solid fa-copy"></i> КОПИРАЙ</button>
+            <textarea id="transcription" class="textarea mt-4" rows="10" readonly></textarea>
             
         </div>
     </section>
 
-    <div class="loader-wrapper" style="display: none;">
-        <div class="loader is-loading"></div>
+    <div class="loader-wrapper hidden">
+        <div class="loader"></div>
     </div>
 
     <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/wavesurfer.min.js"></script>
@@ -109,7 +141,7 @@
         function updateRegionDisplay(region) {
             const start = formatTime(region.start);
             const end = formatTime(region.end);
-            document.getElementById('regionTimes').textContent = `Region: Start: ${start}, End: ${end}`;
+            document.getElementById('regionTimes').textContent = `Начало: ${start}, Край: ${end}`;
         }
 
         function showLoader() {
@@ -150,22 +182,47 @@
             wavesurfer.loadBlob(file);
             
             wavesurfer.on('ready', function() {
-                console.log('WaveSurfer is ready');
-                document.getElementById('playPause').onclick = function() {
+                const playPauseButton = document.getElementById('playPause');
+                const playIcon = document.getElementById('playIcon');
+                const pauseIcon = document.getElementById('pauseIcon');
+    
+                // Single onclick handler to toggle playback and icons
+                playPauseButton.onclick = function() {
                     wavesurfer.playPause();
+                    // Icons will be updated via Wavesurfer events
                 };
+    
+                // console.log('WaveSurfer is ready');
                 hideLoader();
+    
                 // Update current time display during playback
                 wavesurfer.on('audioprocess', function() {
                     const currentTime = wavesurfer.getCurrentTime();
-                    document.getElementById('currentTime').textContent = 'Current Time: ' + formatTime(currentTime);
+                    document.getElementById('currentTime').textContent = 'Позиция: ' + formatTime(currentTime);
                 });
-
+    
                 // Update current time display when user seeks
                 wavesurfer.on('seek', function() {
                     const currentTime = wavesurfer.getCurrentTime();
-                    document.getElementById('currentTime').textContent = 'Current Time: ' + formatTime(currentTime);
+                    document.getElementById('currentTime').textContent = 'Позиция: ' + formatTime(currentTime);
                 });
+            });
+    
+            // Update icons based on playback events
+            wavesurfer.on('play', function() {
+                document.getElementById('playIcon').style.display = 'none';
+                document.getElementById('pauseIcon').style.display = 'inline-block';
+            });
+    
+            wavesurfer.on('pause', function() {
+                document.getElementById('playIcon').style.display = 'inline-block';
+                document.getElementById('pauseIcon').style.display = 'none';
+            });
+    
+            // Reset icons when playback finishes
+            wavesurfer.on('finish', function() {
+                document.getElementById('playIcon').style.display = 'inline-block';
+                document.getElementById('pauseIcon').style.display = 'none';
             });
             
             wavesurfer.on('error', function(err) {
@@ -246,7 +303,7 @@
             // Convert the selected AudioBuffer to WAV Blob
             const wavBlob = await audioBufferToWav(selectedAudioBuffer);
         
-            console.log('Selected WAV blob size:', wavBlob.size);
+            // console.log('Selected WAV blob size:', wavBlob.size);
         
             const formData = new FormData();
             formData.append('file', wavBlob, 'audio.wav');
@@ -259,7 +316,7 @@
                 });
                 hideLoader();
                 const data = await response.json();
-                console.log('Server response:', data);
+                // console.log('Server response:', data);
                 document.getElementById('transcription').value = data.transcription || data.error;
             } catch (error) {
                 hideLoader();
@@ -354,7 +411,7 @@
                 // Convert chunk AudioBuffer to WAV Blob
                 const wavBlob = await audioBufferToWav(chunkBuffer);
     
-                console.log(`Processing chunk: ${currentTime}s to ${endTime}s`);
+                // console.log(`Processing chunk: ${currentTime}s to ${endTime}s`);
     
                 // Send the chunk to backend for transcription
                 const formData = new FormData();
@@ -366,7 +423,7 @@
                         body: formData
                     });
                     const data = await response.json();
-                    console.log('Server response:', data);
+                    // console.log('Server response:', data);
                     if (data.transcription) {
                         combinedTranscription += data.transcription + ' ';
                     } else if (data.error) {
@@ -400,7 +457,7 @@
             for (let i = endSample; i > endSample - backwardSearchSamples && i > startSample; i--) {
                 if (Math.abs(channelData[i]) < silenceThreshold) {
                     const adjustedEndTime = i / sampleRate;
-                    console.log(`Adjusted endTime from ${endTime}s to ${adjustedEndTime}s to avoid splitting a word.`);
+                    // console.log(`Adjusted endTime from ${endTime}s to ${adjustedEndTime}s to avoid splitting a word.`);
                     return adjustedEndTime;
                 }
             }
