@@ -28,7 +28,7 @@
         }
         .loader {
             border: 8px solid rgba(196, 25, 25, 0.521);
-            border-top: 8px solid rgb(255, 0, 0);
+            border-top: 8px solid rgb(119, 0, 255);
             border-radius: 50%;
             width: 60px;
             height: 60px;
@@ -38,12 +38,37 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        #recordingStatus {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        /* Example of a custom spinner for recording status */
+        .has-text-danger .fa-circle-notch {
+            font-size: 1.5em;
+        }
     </style>
 </head>
 <body>
     <section class="section">
         <div class="container">
-            <div id="waveform" class="mt-4"></div>
+            <div id="waveform" class="mt-2"></div>
+            <!-- New Recording Controls -->
+            <div class="buttons mt-2">
+                <button id="recordButton" class="button is-danger">
+                    <i class="fa-solid fa-microphone"></i>
+                    <span>Запиши</span>
+                </button>
+                <button id="stopButton" class="button is-warning" disabled>
+                    <i class="fa-solid fa-square"></i>
+                    <span>Спри</span>
+                </button>
+            </div>
+
+            <!-- Recording Status Indicator -->
+            <div id="recordingStatus" class="mt-2 has-text-danger" style="display: none;">
+                <i class="fa-solid fa-circle-notch fa-spin"></i> Записване...
+            </div>
             <div class="file has-name is-fullwidth">
                 <label class="file-label">
                     <input class="file-input" type="file" id="audioFile" accept="audio/*, .m4a" onchange="loadAudio()">
@@ -68,12 +93,12 @@
                     <i id="playIcon" class="fa-solid fa-play"></i>
                     <i id="pauseIcon" class="fa-solid fa-pause" style="display: none;"></i>
                 </button>
-                <button onclick="createRegion()" class="button is-info">1 мин Регион</button>
-                <button onclick="transcribeSelection()" class="button is-info">Транскр. Регион</button>
-                <button onclick="transcribeWholeAudio()" class="button is-danger">Транскрибиране всичко<i class="fa-solid fas-pipe-section"></i></button>
+                <button onclick="createRegion()" class="button is-info is-outlined">1 мин Регион</button>
+                <button onclick="transcribeSelection()" class="button is-info is-outlined">Транскр. Регион</button>
+                <button onclick="transcribeWholeAudio()" class="button is-danger">Транскрибирай всичко<i class="fa-solid fas-pipe-section"></i></button>
             </div>
 
-            <button onclick="copyTranscription()" class="button is-link mt-2"><i class="fa-solid fa-copy"></i></button>
+            <button onclick="copyTranscription()" class="button is-link mt-2 is-outlined"><i class="fa-solid fa-copy"></i></button>
             <textarea id="transcription" class="textarea mt-4" rows="10" readonly></textarea>
             
         </div>
@@ -88,6 +113,10 @@
     <script>
         let wavesurfer;
         let audioBlob;
+        let mediaRecorder;
+        let recordedChunks = [];
+        let audioStream;
+
 
         function copyTranscription() {
             const transcriptionText = document.getElementById('transcription').value;
@@ -465,6 +494,135 @@
             // If no silence detected, return original endTime
             return endTime;
         }
+        // Initialize recording
+    async function initRecording() {
+        try {
+            // Request microphone access
+            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(audioStream);
+
+            mediaRecorder.ondataavailable = function(event) {
+                if (event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = async function() {
+                const blob = new Blob(recordedChunks, { type: 'audio/wav' });
+                recordedChunks = [];
+                audioBlob = blob;
+
+                // Update UI
+                document.getElementById('fileName').textContent = 'Записан аудио файл';
+                
+                // Load the recorded audio into Wavesurfer
+                if (wavesurfer) {
+                    wavesurfer.destroy();
+                }
+
+                showLoader();
+
+                wavesurfer = WaveSurfer.create({
+                    container: '#waveform',
+                    waveColor: 'violet',
+                    progressColor: 'purple',
+                    plugins: [
+                        WaveSurfer.regions.create()
+                    ]
+                });
+
+                wavesurfer.loadBlob(blob);
+
+                wavesurfer.on('ready', function() {
+                    const playPauseButton = document.getElementById('playPause');
+                    const playIcon = document.getElementById('playIcon');
+                    const pauseIcon = document.getElementById('pauseIcon');
+
+                    playPauseButton.onclick = function() {
+                        wavesurfer.playPause();
+                    };
+
+                    console.log('WaveSurfer is ready');
+                    hideLoader();
+
+                    // Update current time display during playback
+                    wavesurfer.on('audioprocess', function() {
+                        const currentTime = wavesurfer.getCurrentTime();
+                        document.getElementById('currentTime').textContent = 'Current Time: ' + formatTime(currentTime);
+                    });
+
+                    // Update current time display when user seeks
+                    wavesurfer.on('seek', function() {
+                        const currentTime = wavesurfer.getCurrentTime();
+                        document.getElementById('currentTime').textContent = 'Current Time: ' + formatTime(currentTime);
+                    });
+                });
+
+                // Update icons based on playback events
+                wavesurfer.on('play', function() {
+                    document.getElementById('playIcon').style.display = 'none';
+                    document.getElementById('pauseIcon').style.display = 'inline-block';
+                });
+
+                wavesurfer.on('pause', function() {
+                    document.getElementById('playIcon').style.display = 'inline-block';
+                    document.getElementById('pauseIcon').style.display = 'none';
+                });
+
+                // Reset icons when playback finishes
+                wavesurfer.on('finish', function() {
+                    document.getElementById('playIcon').style.display = 'inline-block';
+                    document.getElementById('pauseIcon').style.display = 'none';
+                });
+
+                wavesurfer.on('error', function(err) {
+                    console.error('WaveSurfer error:', err);
+                    hideLoader();
+                });
+            };
+        } catch (err) {
+            console.error('Error accessing microphone:', err);
+            alert('Неуспешно достъпване до микрофона. Моля, уверете се, че разрешавате достъпа до микрофона.');
+        }
+    }
+
+    // Start Recording
+    function startRecording() {
+        if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+            recordedChunks = [];
+            mediaRecorder.start();
+            document.getElementById('recordingStatus').style.display = 'flex';
+            document.getElementById('recordButton').disabled = true;
+            document.getElementById('stopButton').disabled = false;
+        }
+    }
+
+    // Stop Recording
+    function stopRecording() {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+            audioStream.getTracks().forEach(track => track.stop());
+            document.getElementById('recordingStatus').style.display = 'none';
+            document.getElementById('recordButton').disabled = false;
+            document.getElementById('stopButton').disabled = true;
+        }
+    }
+
+    // Initialize recording on page load if microphone is available
+    window.onload = async function() {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            await initRecording();
+        } else {
+            // Hide recording buttons if microphone is not available
+            document.getElementById('recordButton').style.display = 'none';
+            document.getElementById('stopButton').style.display = 'none';
+            document.getElementById('recordingStatus').style.display = 'none';
+        }
+    };
+
+    // Attach event listeners to Recording Buttons
+    document.getElementById('recordButton').addEventListener('click', startRecording);
+    document.getElementById('stopButton').addEventListener('click', stopRecording);
     </script>
 </body>
 </html>

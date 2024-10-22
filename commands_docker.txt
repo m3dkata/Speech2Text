@@ -1,0 +1,3 @@
+sudo rm -Rf Speech2Text
+git clone https://github.com/m3dkata/Speech2Text.git
+docker build --no-cache  -t speech2text /home/ubuntu/Speech2Text
